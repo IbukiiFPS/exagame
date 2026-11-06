@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#ffffff" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Suan Suk" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<title>Garden of Wellbeing (Suan Suk)</title>
+
+<!-- CDN libraries -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+
+<style>
+  :root{
+    --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --soft:#f3f8fc; --card:rgba(255,255,255,.92);
+    --cyan:#0284c7; --cyan-fill:#38bdf8; --cyan-tint:#e6f6ff;
+    --gold:#f59e0b; --gold-ink:#b45309;
+    --ok:#16a34a; --warn:#ea580c; --bad:#dc2626;
+    --st:env(safe-area-inset-top,0px); --sb:env(safe-area-inset-bottom,0px);
+    --sl:env(safe-area-inset-left,0px); --sr:env(safe-area-inset-right,0px);
+    --shadow:0 8px 28px rgba(15,23,42,.10);
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;background:#fff;color:var(--ink);overflow:hidden;touch-action:manipulation;overscroll-behavior:none;
+    font-family:ui-rounded,"SF Pro Rounded","Nunito","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+    -webkit-text-size-adjust:100%}
+  button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+  button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+  [hidden]{display:none!important}
+
+  /* ---------- stage: sky + 3D garden + overlays ---------- */
+  #camera-container{position:fixed;left:0;top:0;width:100%;height:100%;height:100dvh;overflow:hidden;
+    background:linear-gradient(#ffffff 0%,#f2f9ff 50%,#dff0fd 100%)}
+  #input-video{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+  #three-canvas{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:1}
+  /* small camera preview (off by default) */
+  #output-canvas{display:none;position:absolute;left:calc(var(--sl) + 12px);top:calc(var(--st) + 106px);z-index:6;
+    width:min(30vw,170px);height:auto;border-radius:16px;border:3px solid #fff;box-shadow:var(--shadow);transform:scaleX(-1);background:#e5e7eb}
+  #camera-container.cam-on #output-canvas{display:block}
+
+  .card{background:var(--card);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-radius:22px;box-shadow:var(--shadow);border:1px solid rgba(15,23,42,.05)}
+
+  /* ---------- corner stats ---------- */
+  #hud{position:absolute;left:0;right:0;top:0;z-index:7;display:flex;justify-content:space-between;align-items:flex-start;gap:10px;
+    padding:calc(var(--st) + 12px) calc(var(--sr) + 12px) 0 calc(var(--sl) + 12px);pointer-events:none}
+  #hud>*{pointer-events:auto}
+  .hud-left{display:flex;align-items:center;gap:12px;padding:8px 16px 8px 8px}
+  .ring{position:relative;width:66px;height:66px;flex:none}
+  .ring svg{width:100%;height:100%;transform:rotate(-90deg)}
+  .rg-bg{fill:none;stroke:#e6edf5;stroke-width:5}
+  .rg-fg{fill:none;stroke:var(--cyan-fill);stroke-width:5;stroke-linecap:round;stroke-dasharray:119.4;stroke-dashoffset:119.4;transition:stroke-dashoffset .5s ease}
+  .ring-num{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1}
+  .ring-num b{font-size:23px;font-weight:800;font-variant-numeric:tabular-nums}
+  .ring-num small{font-size:10px;color:var(--muted);margin-top:2px}
+  .mini-row{display:flex;align-items:baseline;gap:5px;font-size:12px;color:var(--muted);line-height:1.5}
+  .mini-row b{font-size:18px;color:var(--ink);font-variant-numeric:tabular-nums}
+  .mini-row i{font-style:normal;font-size:14px}
+
+  #hudRight{display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+  .hud-right{padding:8px 16px;text-align:right;min-width:118px}
+  .score small{display:block;font-size:10px;letter-spacing:1.6px;color:var(--muted);font-weight:700}
+  .score b{display:block;font-size:30px;line-height:1.05;font-weight:800;color:var(--gold);font-variant-numeric:tabular-nums}
+  .sub-row{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:2px;font-weight:700;color:var(--gold-ink);font-size:15px}
+  #garden{font-size:20px}
+  .fabs{display:flex;gap:10px}
+  .fab{width:52px;height:52px;border-radius:50%;background:var(--card);box-shadow:var(--shadow);font-size:24px;
+    display:flex;align-items:center;justify-content:center;border:1px solid rgba(15,23,42,.05)}
+  .fab:active{transform:scale(.94)}
+  .bump{animation:bump .45s ease}
+  @keyframes bump{40%{transform:scale(1.12)}}
+
+  /* ---------- bottom: prompt + exercise selector ---------- */
+  #bottom{position:absolute;left:0;right:0;bottom:0;z-index:7;display:flex;flex-direction:column;align-items:center;gap:10px;
+    padding:0 calc(var(--sr) + 12px) calc(var(--sb) + 12px) calc(var(--sl) + 12px);pointer-events:none}
+  #bottom>*{pointer-events:auto}
+  #banner{max-width:min(600px,100%);text-align:center;padding:10px 20px;border-radius:999px;font-weight:700;line-height:1.3;
+    font-size:clamp(15px,4.2vw,20px);background:var(--card);box-shadow:var(--shadow);border:2px solid transparent;
+    transition:background .2s,border-color .2s,color .2s}
+  #banner.info{color:var(--cyan);border-color:rgba(56,189,248,.45)}
+  #banner.warn{color:var(--warn);border-color:rgba(234,88,12,.4);background:#fff7ed}
+  #banner.ok{color:var(--ok);border-color:rgba(22,163,74,.4);background:#f0fdf4}
+  #bar{display:flex;gap:8px;padding:8px;border-radius:28px;width:min(660px,100%)}
+  .mode{flex:1;min-width:0;min-height:74px;border-radius:20px;padding:8px 4px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+    font-weight:700;font-size:clamp(12px,3.3vw,15px);line-height:1.15;color:var(--muted);text-align:center;transition:background .15s,color .15s}
+  .mode .mi{font-size:28px;line-height:1;margin-bottom:2px}
+  .mode small{font-weight:500;font-size:11px;color:#94a3b8}
+  .mode.active{background:linear-gradient(#eef9ff,#d9f0ff);color:var(--cyan);box-shadow:inset 0 0 0 2px var(--cyan-fill)}
+  .mode.active small{color:var(--cyan)}
+
+  #toast{position:absolute;left:50%;top:28%;z-index:9;transform:translate(-50%,12px) scale(.9);opacity:0;pointer-events:none;
+    padding:10px 26px;border-radius:999px;background:#fff;box-shadow:0 12px 32px rgba(245,158,11,.35);
+    font-size:clamp(22px,6vw,38px);font-weight:900;color:var(--gold);white-space:nowrap;transition:all .35s}
+  #toast.show{opacity:1;transform:translate(-50%,0) scale(1)}
+
+  /* loading / error overlay */
+  #status{position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
+    text-align:center;background:rgba(255,255,255,.95);padding:24px;font-size:18px;line-height:1.5}
+  #status.hidden{display:none}
+  .spin{width:42px;height:42px;border-radius:50%;border:4px solid #e0f2fe;border-top-color:var(--cyan-fill);animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #status.err .spin{display:none}
+  #status.err #statusMsg{color:var(--bad);font-weight:600}
+
+  /* ---------- buttons / form bits (shared) ---------- */
+  .big{width:100%;min-height:56px;border-radius:18px;font-weight:800;font-size:19px;background:var(--soft);color:var(--ink);border:2px solid var(--line)}
+  .big.primary{background:var(--cyan);color:#fff;border-color:var(--cyan)}
+  .pbtn{min-height:46px;padding:10px 16px;border-radius:14px;font-weight:700;font-size:15px;background:var(--soft);color:var(--ink);border:1.5px solid var(--line)}
+  .pbtn:hover:not(:disabled){border-color:var(--cyan-fill)}
+  .pbtn:disabled{opacity:.45;cursor:not-allowed}
+  .pbtn.primary{background:var(--cyan);border-color:var(--cyan);color:#fff}
+  .btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .fld{display:block;font-size:13px;color:var(--muted);margin-top:12px;font-weight:600}
+  .fld select,.fld input,.cal-name{display:block;width:100%;margin-top:6px;min-height:46px;background:var(--soft);color:var(--ink);border:1.5px solid var(--line);
+    border-radius:12px;padding:8px 12px;font-size:16px;font-family:inherit}
+  .legend{font-size:13px;color:var(--muted);margin-top:10px;line-height:1.45}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin:0 4px 0 0;vertical-align:-1px}
+  .tog{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px;font-size:16px;font-weight:600;cursor:pointer;border-bottom:1px solid var(--line)}
+  .tog input{width:24px;height:24px;accent-color:#0284c7;flex:none}
+  .seg{display:flex;gap:6px;margin-bottom:10px;background:var(--soft);padding:4px;border-radius:14px}
+  .seg button{flex:1;min-height:42px;border-radius:11px;font-weight:700;font-size:15px;color:var(--muted)}
+  .seg button.on{background:#fff;color:var(--cyan);box-shadow:0 2px 8px rgba(15,23,42,.1)}
+
+  /* ---------- sheets (coach + menu) ---------- */
+  #backdrop{position:fixed;inset:0;z-index:19;background:rgba(15,23,42,.28);opacity:0;visibility:hidden;transition:opacity .25s,visibility 0s .25s}
+  #backdrop.show{opacity:1;visibility:visible;transition:opacity .25s}
+  .sheet{position:fixed;z-index:20;left:0;right:0;bottom:0;max-height:84vh;max-height:84dvh;background:#fff;display:flex;flex-direction:column;
+    border-radius:28px 28px 0 0;box-shadow:0 -12px 40px rgba(15,23,42,.18);transform:translateY(105%);visibility:hidden;
+    transition:transform .28s ease,visibility 0s .28s}
+  .sheet.open{transform:none;visibility:visible;transition:transform .28s ease}
+  .sheet-h{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 18px 8px}
+  .sheet-h h2{font-size:19px;font-weight:800}
+  .x{width:44px;height:44px;border-radius:50%;background:var(--soft);font-size:18px;color:var(--muted)}
+  .sheet-b{overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 18px calc(var(--sb) + 20px)}
+  .sheet-b h3{font-size:12px;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted);margin:20px 0 6px;font-weight:800}
+  .sheet-b h3:first-child{margin-top:4px}
+  @media (min-width:900px){
+    .sheet{left:auto;top:0;bottom:0;width:380px;max-height:none;border-radius:0;transform:translateX(105%)}
+    .sheet.open{transform:none}
+  }
+
+  #grandpa3d{width:100%;height:min(44dvh,320px);display:block;border-radius:18px;background:linear-gradient(#f4faff,#dff0fd)}
+  #gCap{font-size:15px;margin:10px 2px 8px;min-height:22px;line-height:1.4}
+  #chips{display:flex;gap:6px;flex-wrap:wrap}
+  .chip{font-size:13px;padding:6px 12px;border-radius:999px;background:var(--soft);border:1px solid var(--line);color:var(--muted);font-weight:600}
+  .chip.on{background:var(--cyan-tint);border-color:var(--cyan-fill);color:var(--cyan)}
+  .chip.hit{background:#dcfce7;border-color:#86efac;color:var(--ok)}
+  .read{display:flex;justify-content:space-between;align-items:center;padding:9px 10px;border-radius:12px;font-size:16px;opacity:.5}
+  .read.focus{opacity:1;background:var(--cyan-tint)}
+  .read b{font-size:20px;color:var(--cyan);font-variant-numeric:tabular-nums}
+  .read.hit b{color:var(--ok)}
+  .read small{display:block;font-size:12px;color:var(--muted);font-weight:500}
+  .about{font-size:13px;color:var(--muted);line-height:1.55}
+  .about a{color:var(--cyan)}
+
+  /* ---------- welcome screen ---------- */
+  #welcome{position:fixed;inset:0;z-index:30;background:linear-gradient(#ffffff,#eaf5fd);display:flex;align-items:center;justify-content:center;
+    padding:calc(var(--st) + 16px) 20px calc(var(--sb) + 16px);overflow:auto}
+  #welcome.hide{display:none}
+  .w-card{width:min(440px,100%);text-align:center;margin:auto}
+  .w-logo{font-size:64px;line-height:1}
+  .w-card h1{font-size:clamp(26px,7vw,34px);font-weight:900;margin-top:10px}
+  .w-card .sub{color:var(--muted);margin-top:4px;font-weight:600}
+  .tips{list-style:none;text-align:left;margin:22px 0;display:grid;gap:10px}
+  .tips li{display:flex;gap:12px;align-items:center;background:#fff;border-radius:18px;padding:12px 14px;box-shadow:var(--shadow);font-size:15px;line-height:1.4}
+  .tips li span{font-size:26px;flex:none}
+  .w-card .big+.big{margin-top:10px}
+  .fine{margin-top:16px;font-size:12px;color:var(--muted)}
+
+  /* ---------- calibration wizard ---------- */
+  #calib{position:fixed;inset:0;z-index:50;background:#fff;display:flex;overflow:auto;
+    padding:calc(var(--st) + 10px) 14px calc(var(--sb) + 14px)}
+  #calib[hidden]{display:none}
+  .cal-box{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;width:min(1100px,100%);margin:auto}
+  @media (min-width:820px) and (orientation:landscape){ .cal-box{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:24px} #calibView{max-height:76dvh!important} }
+  #calibView{display:block;width:100%;height:auto;max-height:36dvh;object-fit:contain;background:#0f172a;border-radius:18px;transform:scaleX(-1);border:3px solid var(--cyan-fill)}
+  #calChecks{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+  .chk{padding:9px 10px;border-radius:12px;background:var(--soft);border:1.5px solid var(--line);font-size:14px;color:var(--muted);font-weight:600}
+  .chk.on{border-color:#86efac;color:var(--ok);background:#f0fdf4}
+  .chk.opt.off{border-style:dashed}
+  /* right-hand column: keep the hand-raise prompt right under the instructions, even on a small phone */
+  .cal-box>div:last-child{display:flex;flex-direction:column}
+  #calStepNo{order:1}#calTitle{order:2}#calText{order:3}#calGesture{order:4}#calMsg{order:5}#calCount{order:6}#calBar{order:7}#calLive{order:8}#calSummary{order:9}.cal-actions{order:10}
+  #calStepNo{font-size:13px;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted);font-weight:700}
+  #calTitle{font-size:clamp(26px,6.5vw,34px);color:var(--cyan);margin:4px 0 8px;font-weight:900}
+  #calText{font-size:clamp(16px,4.2vw,19px);line-height:1.5}
+  #calLive{font-size:18px;color:var(--cyan);margin-top:10px;min-height:26px;font-variant-numeric:tabular-nums;font-weight:700}
+  #calCount{font-size:clamp(48px,14vw,72px);font-weight:900;color:var(--gold);min-height:1.2em;line-height:1.2}
+  #calBar{height:10px;background:#e6edf5;border-radius:6px;overflow:hidden}
+  #calBar i{display:block;height:100%;width:0;background:var(--cyan-fill)}
+  #calMsg{font-size:17px;min-height:46px;margin-top:8px;font-weight:600}
+  #calMsg.bad{color:var(--warn)}
+  #calMsg.good{color:var(--ok)}
+  .cal-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+  .cal-actions .pbtn{font-size:17px;padding:12px 22px;min-height:52px}
+  #calSummary table{width:100%;border-collapse:collapse;font-size:16px;margin:8px 0}
+  #calSummary td,#calSummary th{padding:8px;border-bottom:1px solid var(--line);text-align:left}
+  #calSummary th{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:1px}
+  #calSummary td.diff{color:var(--gold-ink);font-weight:800}
+  #calSummary ul{margin:8px 0 8px 20px;font-size:15px;color:var(--warn)}
+
+  /* phones in landscape: tighter */
+  @media (max-height:480px){
+    .mode{min-height:56px}.mode .mi{font-size:22px}.mode small{display:none}
+    #banner{padding:6px 16px;font-size:15px}
+    .ring{width:54px;height:54px}.score b{font-size:24px}
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ STAGE ============ -->
+<div id="camera-container">
+  <video id="input-video" playsinline muted></video>
+  <canvas id="three-canvas"></canvas>
+  <canvas id="output-canvas" width="1280" height="720"></canvas>
+
+  <!-- corner stats -->
+  <div id="hud">
+    <div class="card hud-left">
+      <div class="ring" id="bdReps" role="img" aria-label="Reps toward today's goal">
+        <svg viewBox="0 0 44 44"><circle class="rg-bg" cx="22" cy="22" r="19"/><circle class="rg-fg" id="ringFg" cx="22" cy="22" r="19"/></svg>
+        <div class="ring-num"><b id="reps">0</b><small>of <span id="goal">20</span></small></div>
+      </div>
+      <div class="mini">
+        <div class="mini-row"><i>🔥</i><b id="kcal">0.0</b><span>kcal</span></div>
+        <div class="mini-row"><i>⏱</i><b id="time">0:00</b></div>
+      </div>
+    </div>
+
+    <div id="hudRight">
+      <div class="card hud-right">
+        <div class="score" id="bdScore"><small>SCORE</small><b id="score">0</b></div>
+        <div class="sub-row"><span id="bdCoins">🪙 <span id="coins">0</span></span><span id="garden" title="Garden growth">🌱</span></div>
+      </div>
+      <div class="fabs">
+        <button class="fab" id="btnCoach" aria-label="Open coach">🧓</button>
+        <button class="fab" id="btnMenu" aria-label="Open menu">⚙️</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" role="status"></div>
+
+  <!-- prompt + exercise selector -->
+  <div id="bottom">
+    <div id="banner" class="info" role="status">Loading…</div>
+    <nav id="bar" class="card" role="tablist" aria-label="Exercise">
+      <button class="mode active" role="tab" aria-selected="true"  data-mode="potato"><span class="mi">🍠</span>Sweet Potato Pull<small>Sit-to-Stand</small></button>
+      <button class="mode"        role="tab" aria-selected="false" data-mode="fruit"><span class="mi">🍎</span>High Fruit Picking<small>Arm Raises</small></button>
+      <button class="mode"        role="tab" aria-selected="false" data-mode="sort"><span class="mi">🧺</span>Fruit Sorting<small>Torso Twists</small></button>
+    </nav>
+  </div>
+
+  <div id="status" class="hidden" role="alert">
+    <div class="spin"></div>
+    <p id="statusMsg">Starting camera and loading the pose model…<br>Please allow camera access.</p>
+    <button class="pbtn primary" id="statusRetry" hidden>Try again</button>
+  </div>
+</div>
+
+<div id="backdrop"></div>
+
+<!-- ============ COACH SHEET ============ -->
+<section class="sheet" id="coachSheet" aria-label="Coach">
+  <div class="sheet-h"><h2>Grandpa Somchai · Coach</h2><button class="x" data-close aria-label="Close">✕</button></div>
+  <div class="sheet-b">
+    <div class="seg">
+      <button id="segCoach" class="on">Coach demo</button>
+      <button id="segMirror">Mirror me</button>
+    </div>
+    <canvas id="grandpa3d"></canvas>
+    <div id="gCap"></div>
+    <div id="chips"></div>
+    <div class="legend"><i style="background:#39ff14;opacity:.5"></i>Green ghost = the correct target pose</div>
+
+    <h3>Live joint angles</h3>
+    <div class="read" id="rowHip"   data-modes="potato"><span>Hip angle<small id="tHip">target</small></span><b id="rHip">--</b></div>
+    <div class="read" id="rowThigh" data-modes="potato"><span>Thigh verticality<small id="tThigh">target</small></span><b id="rThigh">--</b></div>
+    <div class="read" id="rowKnee"  data-modes="potato"><span>Knee angle<small>information</small></span><b id="rKnee">--</b></div>
+    <div class="read" id="rowLean"  data-modes="potato"><span>Torso lean<small>information</small></span><b id="rLean">--</b></div>
+    <div class="read" id="rowArms"  data-modes="fruit"><span>Arm raise (L / R)<small id="tArms">target</small></span><b id="rArms">--</b></div>
+    <div class="read" id="rowTwist" data-modes="sort"><span>Torso twist<small id="tTwist">target</small></span><b id="rTwist">--</b></div>
+  </div>
+</section>
+
+<!-- ============ MENU SHEET ============ -->
+<section class="sheet" id="menuSheet" aria-label="Menu">
+  <div class="sheet-h"><h2>Menu</h2><button class="x" data-close aria-label="Close">✕</button></div>
+  <div class="sheet-b">
+    <h3>Body profile</h3>
+    <label class="fld">Active profile
+      <select id="profSel"></select>
+    </label>
+    <label class="fld">Leg used for sit-to-stand
+      <select id="sideSel">
+        <option value="auto">Auto (best visible)</option>
+        <option value="L">My left leg</option>
+        <option value="R">My right leg</option>
+      </select>
+    </label>
+    <div class="legend" id="profInfo"></div>
+    <div class="btnrow">
+      <button class="pbtn primary" id="calBtn">Calibrate…</button>
+      <button class="pbtn" id="profDel">Delete</button>
+      <button class="pbtn" id="profCopy">Copy session</button>
+    </div>
+
+    <h3>Settings</h3>
+    <label class="fld">Daily goal
+      <select id="goalSel"><option value="10">10 reps</option><option value="20">20 reps</option><option value="30">30 reps</option><option value="50">50 reps</option></select>
+    </label>
+    <label class="fld">Body weight (kg) – used for the calorie estimate
+      <input id="weightIn" type="number" inputmode="decimal" min="30" max="150" step="1" value="60">
+    </label>
+    <label class="fld">Tracking quality
+      <select id="qualSel">
+        <option value="auto">Auto (fast on phones)</option>
+        <option value="fast">Fast – smoother on phones</option>
+        <option value="accurate">Accurate – needs a stronger device</option>
+      </select>
+    </label>
+    <label class="tog" style="margin-top:8px"><span>Sound effects</span><input type="checkbox" id="soundOn" checked></label>
+    <label class="tog"><span>Show small camera preview</span><input type="checkbox" id="showCam"></label>
+
+    <div class="btnrow">
+      <button class="pbtn" id="resetBtn">Reset this session</button>
+      <button class="pbtn" id="fsBtn">Full screen</button>
+    </div>
+
+    <h3>About</h3>
+    <p class="about">
+      Camera video is processed on this device and is not uploaded. Calories are rough estimates from typical activity values – not medical advice.
+      Player model: “Y Bot from Mixamo” by KinderKiev (Sketchfab), CC BY 4.0.
+    </p>
+  </div>
+</section>
+
+<!-- ============ WELCOME ============ -->
+<div id="welcome">
+  <div class="w-card">
+    <div class="w-logo">🌱</div>
+    <h1>Garden of Wellbeing</h1>
+    <p class="sub">Suan Suk · a gentle movement game</p>
+    <ul class="tips">
+      <li><span>📱</span>Lean your phone against something steady, about 2 metres away.</li>
+      <li><span>🧍</span>Keep your whole body in the picture, with light in front of you.</li>
+      <li><span>🪑</span>For the sit-and-stand game, put a sturdy chair side-on to the camera.</li>
+    </ul>
+    <button class="big primary" id="startBtn">Start</button>
+    <button class="big" id="startCalBtn">Calibrate first</button>
+    <p class="fine">Your camera is only used to follow your movement on this device.</p>
+  </div>
+</div>
+
+<!-- ============ CALIBRATION WIZARD ============ -->
+<div id="calib" hidden>
+  <div class="cal-box">
+    <div>
+      <canvas id="calibView" width="1280" height="720"></canvas>
+      <div id="calChecks">
+        <div class="chk" id="chkHead">Head &amp; shoulders</div>
+        <div class="chk" id="chkArms">Arms &amp; hands</div>
+        <div class="chk" id="chkHips">Hips</div>
+        <div class="chk opt" id="chkLegs">Legs &amp; feet (optional)</div>
+      </div>
+    </div>
+    <div>
+      <div id="calStepNo"></div>
+      <h2 id="calTitle"></h2>
+      <p id="calText"></p>
+      <div id="calLive"></div>
+      <div id="calCount"></div>
+      <div id="calBar"><i></i></div>
+      <div id="calMsg"></div>
+      <div id="calSummary" hidden></div>
+      <div class="cal-actions">
+        <button class="pbtn primary" id="calStart">Start</button>
+        <button class="pbtn" id="calSkip">Skip this step</button>
+        <button class="pbtn" id="calCancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Order matters: game.js creates the shared GW object first -->
+<script src="game.js"></script>
+<script src="calibration.js"></script>
+<script src="mediapipe.js"></script>
+<script src="three-scene.js"></script>
+<script>GW.boot();</script>
+</body>
+</html>
